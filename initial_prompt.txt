@@ -1,0 +1,54 @@
+ # Initial world setup using the tool_creation_tool and subsequent execution
+ # Comments start with #
+
+ # --- CORE TOOL DEFINITIONS ---
+
+ CREATE TOOL name='create_location' description='Creates a new location in the game world. Returns a confirmation message.' parameters='{"type":"object", "properties": {"name": {"type": "string", "description": "The display name for the location."}, "description": {"type": "string", "description": "A textual description of the location."}}, "required": ["name", "description"]}'
+ CREATE TOOL name='link_exit' description='Creates a one-way exit from one location to another in a specific direction. Returns a confirmation message.' parameters='{"type":"object", "properties": {"fromLocationId": {"type": "string", "description": "The ID (lowercase_name) of the starting location."}, "direction": {"type": "string", "description": "The direction of the exit (e.g., north, south, east, west, up, down)."}, "toLocationId": {"type": "string", "description": "The ID (lowercase_name) of the destination location."}}, "required": ["fromLocationId", "direction", "toLocationId"]}'
+ CREATE TOOL name='create_soul' description='Creates a new soul (player or NPC) in a specific location. Returns a confirmation message including the new soul ID.' parameters='{"type":"object", "properties": {"name": {"type": "string", "description": "The name of the soul."}, "locationId": {"type": "string", "description": "The ID of the location where the soul should appear."}, "type": {"type": "string", "description": "Type of soul (e.g., generic, npc, player)", "default": "generic"}}, "required": ["name", "locationId"]}'
+ CREATE TOOL name='create_artifact' description='Creates a new artifact item that can be linked to a tool. Returns a confirmation message including the new artifact ID.' parameters='{"type":"object", "properties": {"name": {"type": "string", "description": "The name of the artifact."}, "description": {"type": "string", "description": "A description of the artifact and its purpose."}, "linkedToolName": {"type": "string", "description": "The exact name of the tool this artifact allows the user to execute."}}, "required": ["name", "description", "linkedToolName"]}'
+ CREATE TOOL name='give_artifact_to_soul' description='Gives a specific artifact to a specific soul. Returns a confirmation message.' parameters='{"type":"object", "properties": {"soulId": {"type": "string", "description": "The ID of the soul receiving the artifact."}, "artifactId": {"type": "string", "description": "The ID of the artifact being given."}}, "required": ["soulId", "artifactId"]}'
+ CREATE TOOL name='move_soul' description='Moves a soul to a target location. Requires the soul to have an artifact linked to this tool. Checks for valid locations. Returns result message.' parameters='{"type":"object", "properties": {"soulId": {"type": "string", "description": "The ID of the soul to move (usually the one performing the action)."}, "targetLocationId": {"type": "string", "description": "The ID of the location to move to."}}, "required": ["soulId", "targetLocationId"]}'
+ CREATE TOOL name='describe_location' description='Provides a description of the specified location, including visible souls and exits. Returns the description as a string.' parameters='{"type":"object", "properties": {"locationId": {"type": "string", "description": "The ID of the location to describe."}}, "required": ["locationId"]}'
+ CREATE TOOL name='look_around' description='Describes the current location of the acting soul, including exits and other souls present. Returns the description string.' parameters='{"type":"object", "properties": {"soulId": {"type": "string", "description": "The ID of the soul looking around."}}, "required": ["soulId"]}'
+
+
+ # --- WORLD BUILDING ---
+
+ # Execute the tools created above to build the initial state
+ # Note: We use the internal functions in server.js for bootstrapping these core elements for reliability.
+ # The LLM *could* generate these functions, but using internals is safer for setup.
+ # These EXECUTE commands tell the server's initial prompt processor to use the internal versions.
+
+ EXECUTE TOOL name='create_location' args='{"name": "Town Square", "description": "A bustling square paved with cobblestones. A fountain bubbles in the center."}'
+ EXECUTE TOOL name='create_location' args='{"name": "Shady Alley", "description": "A narrow, dark alley smelling faintly of refuse. Shadows cling to the corners."}'
+ EXECUTE TOOL name='create_location' args='{"name": "General Store", "description": "A shop filled with various goods. Shelves line the walls, stocked with essentials and trinkets. A merchant eyes you."}'
+
+ EXECUTE TOOL name='link_exit' args='{"fromLocationId": "town_square", "direction": "north", "toLocationId": "general_store"}'
+ EXECUTE TOOL name='link_exit' args='{"fromLocationId": "general_store", "direction": "south", "toLocationId": "town_square"}'
+ EXECUTE TOOL name='link_exit' args='{"fromLocationId": "town_square", "direction": "east", "toLocationId": "shady_alley"}'
+ EXECUTE TOOL name='link_exit' args='{"fromLocationId": "shady_alley", "direction": "west", "toLocationId": "town_square"}'
+
+ # Create an NPC
+ EXECUTE TOOL name='create_soul' args='{"name": "Bob the Merchant", "locationId": "general_store", "type": "npc"}'
+ # Let BobId be the result of the above command (Server needs to handle this - currently returns string, need to parse ID)
+ # Example Placeholder ID for Bob: assuming it's 'bob_merchant_id' after creation
+ # Let's assume the server internally stores the last created ID or the prompt processor handles ID passing.
+ # For now, manual placeholder - replace with actual ID parsing/handling if possible.
+
+
+ # --- ARTIFACTS AND ACTIONS ---
+
+ # Create artifacts linked to the tools
+ EXECUTE TOOL name='create_artifact' args='{"name": "Boots of Walking", "description": "These boots allow movement between adjacent locations.", "linkedToolName": "move_soul"}'
+ EXECUTE TOOL name='create_artifact' args='{"name": "Amulet of Observation", "description": "Focus your senses to observe your surroundings.", "linkedToolName": "look_around"}'
+
+ # Give artifacts to souls (e.g., the initial player soul created on connection, and NPCs)
+ # This part is tricky in the initial prompt as player soul ID isn't known yet.
+ # The server logic assigns artifacts to new players on connection or players find them.
+ # We can give artifacts to the NPC Bob here (assuming we got his ID).
+ # EXECUTE TOOL name='give_artifact_to_soul' args='{"soulId": "bob_merchant_id", "artifactId": "amulet_of_observation_id"}' # Requires artifact ID to be parsed too
+
+
+ # --- Addendum: Server should give new players "Boots of Walking" and "Amulet of Observation" ---
+ # This instruction isn't a command, but a note for server logic implementation.

@@ -1,0 +1,33 @@
+{
+  "name": "infinite-mmorpg-tool-creator",
+  "version": "1.0.0",
+  "description": "MMORPG example showcasing dynamic LLM tool creation",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "llm",
+    "tool",
+    "creation",
+    "chromadb",
+    "ollama",
+    "mmorpg",
+    "dynamic",
+    "socket.io",
+    "nodejs",
+    "express"
+  ],
+  "author": "AI Assistant",
+  "license": "MIT",
+  "dependencies": {
+    "@langchain/community": "^0.2.1",
+    "chromadb": "^1.8.1",
+    "express": "^5.1.0",
+    "openai": "^4.47.1",
+    "socket.io": "^4.7.5",
+    "socket.io-client": "^4.7.5"
+  }
+}

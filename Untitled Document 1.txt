@@ -1,0 +1,1646 @@
+Skip to main content
+Google AI Studio
+key
+Studio
+mark_chat_unread
+graphic_eq
+videocam
+extension
+history
+Dashboard
+info
+
+menu
+Gemini 2.5 Pro Preview 03-25
+edit_square
+tune
+settings
+Chat Prompt
+assignment
+code
+more_vert
+edit
+more_vert
+more_vert
+more_vert
+Okay, this is an ambitious and fascinating project! It involves several layers: LLM interaction, dynamic code generation and execution, vector databases (RAG), real-time communication (WebSockets), and game logic orchestration.
+Let's break it down into a plan and then implement the components.
+Plan:
+Project Structure: Define the directory layout and files.
+tool_creation_tool.js (Core Library):
+Implement connection to Ollama (via OpenAI compatible API).
+Implement connection to ChromaDB using chromadb and @langchain/community/embeddings/ollama.
+Implement ToolCreationManager class:
+initialize(): Connect to DB, ensure collection, check/add tool_creation_tool.
+createTool(name, description, parametersSchema):
+Generate LLM prompt (tool_creation_tool_prompt).
+Call Ollama LLM to get code and parameter JSON.
+Validate/Sanitize the generated code string.
+Add the tool (code string, metadata) to ChromaDB with embeddings.
+
+
+getToolDefinition(toolName): Retrieve tool details (code, parameters) from ChromaDB by name/ID.
+getAvailableTools(contextQuery, count): Query ChromaDB for relevant tools based on context, always prepend tool_creation_tool.
+executeTool(toolName, args):
+Retrieve tool code from ChromaDB.
+Safely execute the code using new Function() wrapper with proper parameter passing and error handling.
+Return the result (string).
+
+
+ensureToolCreationTool(): Check if tool_creation_tool exists in DB, if not, add its definition (the description is known, the code part is tricky - it needs to call createTool within the library itself). This might need a slightly special handling or pre-seeding. For simplicity, we'll ensure it's added on initialization.
+
+
+
+
+server.js (MMORPG Backend):
+Use socket.io for real-time communication.
+Initialize ToolCreationManager.
+Load initial_prompt.txt and execute the commands via toolManager to bootstrap the world/tools/souls/artifacts before starting the server (or have a command to trigger this).
+Game State Management: Store world data (locations, souls, artifacts, soul inventories). This state is modified by executed tools.
+Socket Event Handling:
+connection: Create a player soul (or assign control to an existing one), send initial state and available actions.
+disconnect: Handle player leaving.
+performAction: Receive action request from client (tool name + args).
+Verify the soul has the required artifact linked to the tool.
+Call toolManager.executeTool(toolName, args).
+Interpret the string result (e.g., "Moved Player1 to Cave", "Gave Sword to Player1", "Error: Cannot move there").
+Update game state based on the successful execution and result interpretation.
+Broadcast state changes to relevant clients.
+Query for and send updated available actions to the acting player.
+
+
+
+
+Game Loop / NPC Logic:
+Periodically, select NPC souls.
+Determine context (location, nearby entities).
+Get available tools/artifacts for the NPC.
+Maybe use LLM to choose an action (less emphasis per request, focus on artifact use).
+Execute the chosen artifact's tool via toolManager.executeTool.
+Update state and broadcast.
+
+
+Send Debug Info: Relay LLM interactions or tool execution logs to clients if needed.
+
+
+public/index.html (Frontend):
+Minimal HTML structure (log area, action button area).
+JavaScript using socket.io-client.
+Connect to the server.
+Receive gameStateUpdate: Update the log/display.
+Receive availableActions: Dynamically create buttons for each action (artifact use). Buttons should store the toolName and potentially prompt for args if needed (though artifacts might imply args).
+Send performAction when a button is clicked.
+Receive and display debugInfo.
+
+
+initial_prompt.txt: Define initial tool creations (like create_soul, create_location, create_artifact, link_artifact_to_tool, move_soul, give_artifact_to_soul, describe_location) and then use these tools to set up the starting world, a player soul, maybe an NPC, and assign initial artifacts/actions.
+Supporting Files: README.md, setup.sh, run.sh, package.json.
+Error Handling & Safety: Implement robust error handling, especially around dynamic code execution. Sanitize LLM output.
+Implementation:
+Okay, let's create the files.
+1. Project Structure:
+infinite-mmorpg-tool-creator/
+├── tool_creation_tool.js
+├── server.js
+├── initial_prompt.txt
+├── public/
+│   └── index.html
+├── setup.sh
+├── run.sh
+├── package.json
+└── README.md
+content_copy
+download
+Use code with caution.
+2. package.json:
+{
+  "name": "infinite-mmorpg-tool-creator",
+  "version": "1.0.0",
+  "description": "MMORPG example showcasing dynamic LLM tool creation",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "llm",
+    "tool",
+    "creation",
+    "chromadb",
+    "ollama",
+    "mmorpg",
+    "dynamic",
+    "socket.io",
+    "nodejs"
+  ],
+  "author": "AI Assistant",
+  "license": "MIT",
+  "dependencies": {
+    "@langchain/community": "^0.2.1",
+    "chromadb": "^1.8.1",
+    "openai": "^4.47.1",   
+    "socket.io": "^4.7.5",
+    "socket.io-client": "^4.7.5"
+  }
+}
+content_copy
+download
+Use code with caution.Json
+3. setup.sh:
+#!/bin/bash
+
+ echo "Installing Node.js dependencies..."
+ npm install
+
+ echo ""
+ echo "Setup complete. Make sure you have:"
+ echo "1. Ollama running (e.g., 'ollama serve')"
+ echo "2. The qwen2.5-coder:7b-instruct-q8_0 model pulled ('ollama pull qwen2.5-coder:7b-instruct-q8_0')"
+ echo "3. The nomic-embed-text model pulled ('ollama pull nomic-embed-text')"
+ echo "4. ChromaDB running (e.g., via Docker or 'chroma run --path ./chroma_db_data')"
+ echo ""
+ echo "You might need to adjust ChromaDB host/port and Ollama host/port in the scripts if not using defaults."
+ echo ""
+ echo "To run:"
+ echo "./run.sh"
+ echo ""
+content_copy
+download
+Use code with caution.Sh
+Make executable: chmod +x setup.sh
+4. run.sh:
+#!/bin/bash
+
+ # Optional: Start ChromaDB if not running elsewhere
+ # echo "Starting ChromaDB..."
+ # chroma run --path ./chroma_db_data & # Run in background
+ # CHROMA_PID=$!
+ # sleep 5 # Give ChromaDB time to start
+
+ echo "Starting Node.js server..."
+ node server.js
+
+ # Optional: Stop ChromaDB when server exits
+ # echo "Stopping ChromaDB..."
+ # kill $CHROMA_PID
+content_copy
+download
+Use code with caution.Sh
+Make executable: chmod +x run.sh
+5. tool_creation_tool.js:
+import { ChromaClient, OpenAIEmbeddingFunction as ChromaOpenAIEmbeddingFunction } from 'chromadb';
+ import { OllamaEmbeddings } from "@langchain/community/embeddings/ollama";
+ import OpenAI from 'openai';
+ import { v4 as uuidv4 } from 'uuid'; // Use UUID for unique IDs
+
+ const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
+ const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "qwen2.5-coder:7b-instruct-q8_0"; // Model for code generation
+ const OLLAMA_EMBEDDING_MODEL = process.env.OLLAMA_EMBEDDING_MODEL || "nomic-embed-text";
+ const CHROMA_URL = process.env.CHROMA_URL || "http://localhost:8000";
+ const TOOL_COLLECTION_NAME = "llm_tools";
+
+ // --- Tool Definition for the Tool Creator ---
+ const TOOL_CREATION_TOOL_DEFINITION = {
+     type: 'function',
+     function: {
+         name: 'tool_creation',
+         description: 'Define and create a new tool (JavaScript function) that the LLM can use later. Takes the desired tool name, description, and parameter schema.',
+         parameters: {
+             type: 'object',
+             properties: {
+                 new_tool_name: {
+                     type: 'string',
+                     description: 'The name for the new tool function (use snake_case).',
+                 },
+                 new_tool_description: {
+                     type: 'string',
+                     description: 'A clear description of what the new tool does and when to use it.',
+                 },
+                 new_tool_parameters: {
+                     type: 'object',
+                     description: 'A JSON schema object describing the parameters the new function will accept.',
+                     properties: {
+                         type: { type: 'string', enum: ['object'] },
+                         properties: { type: 'object' },
+                         required: { type: 'array', items: { type: 'string' } }
+                     },
+                     required: ['type', 'properties']
+                 }
+             },
+             required: ['new_tool_name', 'new_tool_description', 'new_tool_parameters'],
+         },
+     },
+ };
+
+ const NEW_TOOL_EXAMPLE_SCHEMA = {
+     name: 'example_tool_name',
+     description: 'A concise description of the example function.',
+     parameters: {
+         type: 'object',
+         properties: {
+             param1: { type: 'string', description: 'Description of the first parameter.' },
+             param2: { type: 'boolean', description: 'Description of the second parameter.' },
+         },
+         required: ['param1'],
+     },
+ };
+
+ function generateToolCreationPrompt(name, description, parameters) {
+     // Basic validation for the parameters schema structure
+     if (!parameters || typeof parameters !== 'object' || parameters.type !== 'object' || typeof parameters.properties !== 'object') {
+          throw new Error("Invalid parameters schema provided for new tool creation.");
+     }
+
+     const paramDetails = Object.entries(parameters.properties)
+         .map(([key, value]) => ` *   ${key} (${value.type}): ${value.description || 'No description'}`)
+         .join('\n');
+     const requiredParams = parameters.required || [];
+
+     return `You are an expert JavaScript function generator. Your task is to create a JavaScript function based on the provided specification.
+
+     **Function Specification:**
+     - Name: ${name}
+     - Description: ${description}
+     - Parameters Schema:
+     \`\`\`json
+     ${JSON.stringify(parameters, null, 2)}
+     \`\`\`
+     - Required Parameters: ${requiredParams.join(', ') || 'None'}
+
+     **Instructions:**
+     1.  Write a single, standalone JavaScript function named precisely \`${name}\`.
+     2.  The function MUST accept a single argument: an object named \`params\` containing the specified parameters (e.g., \`params.param1\`, \`params.param2\`).
+     3.  The function should perform the action described in the description.
+     4.  The function MUST return a single string indicating the result or outcome of the action (e.g., "Entity moved successfully.", "Error: Target location not found."). Do NOT return complex objects or boolean values directly, convert them to descriptive strings.
+     5.  Do NOT include any comments, explanations, or surrounding text outside the function definition itself.
+     6.  Do NOT include markdown code block markers (\`\`\`javascript or \`\`\`) in your output.
+     7.  Ensure the function handles potential errors gracefully and returns an informative error string starting with "Error: ".
+
+     **Example Function Structure:**
+     \`\`\`javascript
+     function example_tool_name(params) {
+       // Access parameters like params.param1, params.param2
+       try {
+         // ... function logic based on description ...
+         if (params.param1 === 'special') {
+           return \`Special action performed with \${params.param1}.\`;
+         }
+         return \`Example tool executed with param1: \${params.param1}\`;
+       } catch (error) {
+         console.error('Error in example_tool_name:', error);
+         return \`Error executing example_tool_name: \${error.message}\`;
+       }
+     }
+     \`\`\`
+
+     **Your Task:**
+     Generate *only* the JavaScript function code for \`${name}\` based *exactly* on the specification provided above.`;
+ }
+
+
+ class ToolCreationManager {
+     constructor() {
+         this.ollama = new OpenAI({
+             baseURL: `${OLLAMA_BASE_URL}/v1`,
+             apiKey: 'ollama', // Required by openai package, but not used by Ollama
+         });
+         // Use Langchain's OllamaEmbeddings as it's specifically designed for this
+         this.ollamaEmbeddings = new OllamaEmbeddings({
+             model: OLLAMA_EMBEDDING_MODEL,
+             baseUrl: OLLAMA_BASE_URL,
+         });
+         this.chromaClient = new ChromaClient({ path: CHROMA_URL });
+         this.collection = null;
+         this.toolsCache = new Map(); // Cache for loaded tool code
+         this.isDebug = true; // Enable debug logging
+     }
+
+     debugLog(...args) {
+         if (this.isDebug) {
+             console.log('[DEBUG ToolManager]', ...args);
+         }
+     }
+
+     async initialize() {
+         this.debugLog("Initializing ToolCreationManager...");
+         try {
+             this.debugLog(`Attempting to get or create Chroma collection: ${TOOL_COLLECTION_NAME}`);
+             // Use Langchain embeddings class with Chroma client directly
+             this.collection = await this.chromaClient.getOrCreateCollection({
+                 name: TOOL_COLLECTION_NAME,
+                 embeddingFunction: this.ollamaEmbeddings // Pass the Langchain embedder instance
+             });
+             this.debugLog(`Chroma collection '${TOOL_COLLECTION_NAME}' ready.`);
+             await this.ensureToolCreationTool();
+             this.debugLog("ToolCreationManager initialized successfully.");
+         } catch (error) {
+             console.error("Error initializing ToolCreationManager:", error);
+             throw error; // Re-throw to prevent proceeding in a bad state
+         }
+     }
+
+     // Ensure the core tool_creation tool exists
+     async ensureToolCreationTool() {
+         this.debugLog("Ensuring tool_creation tool exists...");
+         const toolName = TOOL_CREATION_TOOL_DEFINITION.function.name;
+         try {
+             const existing = await this.collection.get({
+                 ids: [toolName],
+                 limit: 1
+             });
+
+             if (existing && existing.ids && existing.ids.length > 0) {
+                 this.debugLog(`'${toolName}' tool found in DB.`);
+                 // Optionally load its definition into cache if needed immediately?
+                 // For now, we just ensure it exists. Execution will load it.
+                 return;
+             }
+         } catch (error) {
+             // Chroma client might throw if the collection is empty or ID not found
+             this.debugLog(`'${toolName}' not found or error checking existence: ${error.message}. Attempting to add.`);
+         }
+
+         try {
+             this.debugLog(`Adding '${toolName}' tool definition to Chroma DB...`);
+
+             // The 'code' for tool_creation is special - it calls this.createTool internally
+             // This is a bit meta. We store a placeholder or indication it's built-in.
+             // For simplicity, we'll store a string indicating it's the internal function.
+             // Execution logic will need to handle this specific tool name.
+             const toolCodePlaceholder = `// Internal ToolCreationManager function: ${toolName}`;
+
+             const description = TOOL_CREATION_TOOL_DEFINITION.function.description;
+             const parameters = TOOL_CREATION_TOOL_DEFINITION.function.parameters;
+
+             // Use the embedding function directly if needed, or rely on collection's default
+             const embedding = await this.ollamaEmbeddings.embedQuery(`${toolName}: ${description}`);
+
+             await this.collection.add({
+                 ids: [toolName],
+                 embeddings: [embedding],
+                 metadatas: [{
+                     name: toolName,
+                     description: description,
+                     parameters_json: JSON.stringify(parameters), // Store schema as JSON string
+                     code: toolCodePlaceholder, // Store the placeholder code
+                     is_internal: true // Flag for special handling
+                 }],
+                 documents: [`Tool definition for ${toolName}: ${description}`] // Document for potential text search
+             });
+             this.debugLog(`'${toolName}' tool added successfully.`);
+         } catch (addError) {
+             console.error(`Failed to add '${toolName}' tool to Chroma DB:`, addError);
+             throw addError; // Critical failure if we can't add the base tool
+         }
+     }
+
+
+     // --- Tool Creation Logic ---
+     async createTool(newToolName, newToolDescription, newToolParameters) {
+         this.debugLog(`Attempting to create tool: ${newToolName}`);
+
+         // 1. Validate Inputs (Basic)
+         if (!newToolName || !newToolDescription || !newToolParameters) {
+             return "Error: Missing required arguments for tool creation (name, description, parameters).";
+         }
+         if (typeof newToolName !== 'string' || typeof newToolDescription !== 'string' || typeof newToolParameters !== 'object') {
+             return "Error: Invalid argument types for tool creation.";
+         }
+          // Simple check for valid function name characters
+         if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(newToolName)) {
+            return `Error: Invalid tool name '${newToolName}'. Use snake_case with letters, numbers, and underscores, starting with a letter or underscore.`;
+         }
+
+
+         // 2. Generate Prompt for LLM
+         const prompt = generateToolCreationPrompt(newToolName, newToolDescription, newToolParameters);
+         this.debugLog(`Generated prompt for LLM for tool ${newToolName}`);
+         // console.log("--- LLM PROMPT ---", prompt, "--- END PROMPT ---"); // Keep for debugging if needed
+
+         let generatedCode = '';
+         try {
+             // 3. Call LLM to generate code
+             this.debugLog(`Calling Ollama (${OLLAMA_MODEL}) to generate function code...`);
+             const response = await this.ollama.chat.completions.create({
+                 model: OLLAMA_MODEL,
+                 messages: [{ role: 'user', content: prompt }],
+                 temperature: 0.2, // Lower temperature for more deterministic code gen
+             });
+
+             generatedCode = response.choices[0]?.message?.content?.trim() || '';
+             this.debugLog(`Received LLM response for ${newToolName}. Length: ${generatedCode.length}`);
+             // console.log("--- LLM RAW RESPONSE ---", generatedCode, "--- END RAW RESPONSE ---"); // Keep for debugging
+
+             if (!generatedCode) {
+                 throw new Error("LLM returned empty code.");
+             }
+
+             // 4. Sanitize and Validate Generated Code
+             generatedCode = this.sanitizeGeneratedCode(generatedCode, newToolName);
+             this.debugLog(`Sanitized code for ${newToolName}:`, generatedCode);
+
+             // Basic validation: Does it look like a function definition?
+              if (!generatedCode.startsWith(`function ${newToolName}(params)`) && !generatedCode.startsWith(`async function ${newToolName}(params)`)) {
+                  throw new Error(`Generated code does not start with the expected function signature 'function ${newToolName}(params) {...}' or 'async function ${newToolName}(params) {...}'. Got: ${generatedCode.substring(0,100)}...`);
+              }
+             // Try creating a function object to catch syntax errors early
+             try {
+                 new Function('params', generatedCode); // This doesn't execute, just parses
+                 this.debugLog(`Syntax validation passed for ${newToolName}.`);
+             } catch (syntaxError) {
+                 throw new Error(`Generated code has syntax errors: ${syntaxError.message}\nCode:\n${generatedCode}`);
+             }
+
+
+         } catch (error) {
+             console.error(`Error during LLM code generation or validation for ${newToolName}:`, error);
+             return `Error: Failed to generate or validate code for tool ${newToolName}. ${error.message}`;
+         }
+
+         // 5. Store in ChromaDB
+         try {
+             this.debugLog(`Adding tool '${newToolName}' to Chroma DB...`);
+             // Re-check if it somehow got created concurrently (less likely in Node.js single thread but good practice)
+              const existing = await this.collection.get({ ids: [newToolName], limit: 1 });
+              if (existing && existing.ids && existing.ids.length > 0) {
+                  this.debugLog(`Tool '${newToolName}' already exists. Skipping add.`);
+                  // Optionally update it here if needed
+                  return `Warning: Tool '${newToolName}' already existed. Creation skipped.`;
+              }
+
+
+             const embedding = await this.ollamaEmbeddings.embedQuery(`${newToolName}: ${newToolDescription}`);
+
+             await this.collection.add({
+                 ids: [newToolName],
+                 embeddings: [embedding],
+                 metadatas: [{
+                     name: newToolName,
+                     description: newToolDescription,
+                     parameters_json: JSON.stringify(newToolParameters),
+                     code: generatedCode, // Store the sanitized, validated code
+                     is_internal: false
+                 }],
+                 documents: [`Tool definition for ${newToolName}: ${newToolDescription}`]
+             });
+
+             this.debugLog(`Tool '${newToolName}' added successfully to Chroma DB.`);
+             this.toolsCache.delete(newToolName); // Invalidate cache if it existed
+
+             return `Successfully created tool: ${newToolName}`;
+
+         } catch (dbError) {
+             console.error(`Error adding tool ${newToolName} to ChromaDB:`, dbError);
+             return `Error: Failed to store tool ${newToolName} in database. ${dbError.message}`;
+         }
+     }
+
+      sanitizeGeneratedCode(code, functionName) {
+         // Remove markdown code block fences
+         let sanitizedCode = code.replace(/^```(?:javascript|js)?\s*|```\s*$/g, '');
+
+         // Ensure it starts with `function functionName(...)` or `async function functionName(...)`
+         // Trim leading/trailing whitespace
+         sanitizedCode = sanitizedCode.trim();
+
+         // If it doesn't start correctly, attempt a basic fix (this is brittle)
+         if (!sanitizedCode.startsWith(`function ${functionName}`) && !sanitizedCode.startsWith(`async function ${functionName}`)) {
+              // Look for the first occurrence of `function` or `async function`
+             const funcIndex = sanitizedCode.search(/^(async\s+)?function\s+/);
+             if (funcIndex !== -1) {
+                 this.debugLog(`Warning: Sanitizing function start for ${functionName}. Original might have had extra text.`);
+                 sanitizedCode = sanitizedCode.substring(funcIndex);
+             } else {
+                  // If no function definition found, wrap it assuming the core logic is there
+                  // This is a last resort and might fail validation later
+                  this.debugLog(`Warning: Could not find standard function definition for ${functionName}. Wrapping code.`);
+                  sanitizedCode = `function ${functionName}(params) {\n${sanitizedCode}\n}`;
+              }
+         }
+
+         return sanitizedCode;
+     }
+
+
+     // --- Tool Retrieval ---
+     async getToolDefinition(toolName) {
+         this.debugLog(`Retrieving definition for tool: ${toolName}`);
+         try {
+             const results = await this.collection.get({
+                 ids: [toolName],
+                 include: ["metadatas"] // Only need metadata which contains code, etc.
+             });
+
+             if (!results || !results.ids || results.ids.length === 0) {
+                 this.debugLog(`Tool '${toolName}' not found in DB.`);
+                 return null;
+             }
+
+             const metadata = results.metadatas[0];
+             if (!metadata || !metadata.code || !metadata.parameters_json) {
+                  console.error(`Error: Incomplete metadata found for tool ${toolName}`, metadata);
+                  return null;
+             }
+
+             return {
+                 name: metadata.name,
+                 description: metadata.description,
+                 parameters: JSON.parse(metadata.parameters_json), // Parse the schema back into an object
+                 code: metadata.code,
+                 is_internal: metadata.is_internal || false
+             };
+         } catch (error) {
+             console.error(`Error retrieving tool ${toolName} from ChromaDB:`, error);
+             return null;
+         }
+     }
+
+     async getAvailableTools(contextQuery, count = 5) {
+         this.debugLog(`Querying for tools relevant to context: "${contextQuery}" (max ${count})`);
+         try {
+             const queryEmbedding = await this.ollamaEmbeddings.embedQuery(contextQuery);
+
+             const results = await this.collection.query({
+                 queryEmbeddings: [queryEmbedding],
+                 nResults: count,
+                 include: ["metadatas"] // Fetch metadata (name, description, params)
+             });
+
+             let availableTools = [];
+             // Always add the tool_creation_tool first if it exists
+              const creatorToolDef = TOOL_CREATION_TOOL_DEFINITION.function; // Use static definition
+              availableTools.push({
+                  name: creatorToolDef.name,
+                  description: creatorToolDef.description,
+                  parameters: creatorToolDef.parameters,
+              });
+
+
+             if (results && results.ids && results.ids.length > 0) {
+                 for (let i = 0; i < results.ids[0].length; i++) {
+                     const toolId = results.ids[0][i];
+                     // Avoid adding tool_creation again if returned by query
+                     if (toolId === TOOL_CREATION_TOOL_DEFINITION.function.name) {
+                         continue;
+                     }
+
+                     const metadata = results.metadatas[0][i];
+                     if (metadata && metadata.name && metadata.description && metadata.parameters_json) {
+                          try {
+                            availableTools.push({
+                                name: metadata.name,
+                                description: metadata.description,
+                                parameters: JSON.parse(metadata.parameters_json), // Parse schema
+                            });
+                          } catch(parseError) {
+                              console.error(`Error parsing parameters for tool ${metadata.name}:`, parseError);
+                              // Skip this tool if params are corrupted
+                          }
+                     } else {
+                          this.debugLog(`Warning: Skipping tool ID ${toolId} due to missing metadata in query results.`);
+                     }
+                 }
+             }
+
+             this.debugLog(`Found ${availableTools.length} available tools.`);
+             return availableTools;
+
+         } catch (error) {
+             console.error("Error querying ChromaDB for available tools:", error);
+             return [TOOL_CREATION_TOOL_DEFINITION.function]; // Return only the base tool on error
+         }
+     }
+
+
+    // --- Tool Execution ---
+    async executeTool(toolName, args) {
+        this.debugLog(`Attempting to execute tool: ${toolName} with args:`, args);
+
+        // Special case: tool_creation is internal
+        if (toolName === TOOL_CREATION_TOOL_DEFINITION.function.name) {
+            this.debugLog(`Executing internal tool: ${toolName}`);
+            try {
+                // Validate args against the known schema for tool_creation
+                 const required = TOOL_CREATION_TOOL_DEFINITION.function.parameters.required;
+                 for (const param of required) {
+                     if (args[param] === undefined || args[param] === null) {
+                         throw new Error(`Missing required parameter '${param}' for tool_creation.`);
+                     }
+                 }
+                 // Add more specific type checks if needed based on schema
+                if(typeof args.new_tool_name !== 'string' || typeof args.new_tool_description !== 'string' || typeof args.new_tool_parameters !== 'object'){
+                     throw new Error("Invalid parameter types for tool_creation.");
+                }
+
+                return await this.createTool(
+                    args.new_tool_name,
+                    args.new_tool_description,
+                    args.new_tool_parameters
+                );
+            } catch (error) {
+                console.error(`Error executing internal tool ${toolName}:`, error);
+                return `Error: Failed to execute ${toolName}. ${error.message}`;
+            }
+        }
+
+        // Retrieve tool definition (including code) from DB
+        const toolDefinition = await this.getToolDefinition(toolName);
+
+        if (!toolDefinition) {
+            return `Error: Tool '${toolName}' not found or definition is corrupted.`;
+        }
+
+        if (toolDefinition.is_internal) {
+             // Should not happen for non-tool_creation internal tools unless added manually
+             console.error(`Error: Attempted to execute unhandled internal tool '${toolName}'`);
+             return `Error: Cannot execute internal tool '${toolName}' directly.`;
+         }
+
+        const { code: toolCode, parameters: schema } = toolDefinition;
+
+        if (!toolCode || typeof toolCode !== 'string') {
+            return `Error: Invalid or missing code for tool '${toolName}'.`;
+        }
+
+        // --- Dynamic Function Execution ---
+        try {
+            this.debugLog(`Preparing to execute code for tool: ${toolName}`);
+            // Validate args against schema before execution (basic check)
+             if (schema && schema.required) {
+                 for (const param of schema.required) {
+                     if (args[param] === undefined || args[param] === null) {
+                         throw new Error(`Missing required parameter '${param}' for tool ${toolName}.`);
+                     }
+                 }
+             }
+            // Add more parameter validation based on schema types if needed
+
+            // Create the function dynamically IN A CONTROLLED SCOPE
+            // The 'use strict' helps catch common errors.
+            // We wrap the retrieved code inside another function to control its scope and execution.
+            const functionWrapper = new Function('params', `
+                'use strict';
+                try {
+                    // Define the function using the code retrieved from DB
+                    ${toolCode}
+
+                    // Check if the function was actually defined
+                    if (typeof ${toolName} !== 'function') {
+                        throw new Error('Tool code did not define function "${toolName}".');
+                    }
+
+                    // Execute the defined function with the provided parameters
+                     const result = ${toolName}(params);
+
+                    // Ensure the result is a string as per the contract
+                    if (typeof result !== 'string') {
+                         console.warn("Tool ${toolName} did not return a string. Converting result:", result);
+                         return String(result); // Attempt conversion
+                     }
+
+                    return result;
+
+                } catch (executionError) {
+                    console.error('Error during dynamic execution of tool "${toolName}":', executionError);
+                     // Return a formatted error string that the calling logic can recognize
+                    return \`Error: Execution failed for tool ${toolName}: \${executionError.message}\`;
+                }
+            `);
+
+            this.debugLog(`Executing function wrapper for ${toolName}...`);
+            const result = functionWrapper(args); // Pass the arguments object
+            this.debugLog(`Execution result for ${toolName}:`, result);
+
+             // Check if the result indicates an error occurred *inside* the tool's try-catch
+             if (typeof result === 'string' && result.startsWith('Error:')) {
+                 console.error(`Tool '${toolName}' reported an internal error: ${result}`);
+                 // Propagate the error string
+             }
+
+            return result; // Return the string result (or error string)
+
+        } catch (wrapperError) {
+            // This catches errors in creating the Function object itself (e.g., syntax errors in toolCode)
+            // or errors *outside* the inner try-catch within the generated function.
+            console.error(`Error creating or executing wrapper for tool '${toolName}':`, wrapperError);
+             return `Error: Failed to execute tool ${toolName}. Malformed code or unexpected runtime error. ${wrapperError.message}`;
+        }
+    }
+ }
+
+ export { ToolCreationManager, TOOL_CREATION_TOOL_DEFINITION };
+content_copy
+download
+Use code with caution.JavaScript
+6. server.js:
+import { createServer } from "http";
+ import { Server } from "socket.io";
+ import fs from 'fs/promises';
+ import path from 'path';
+ import { fileURLToPath } from 'url';
+ import { ToolCreationManager } from "./tool_creation_tool.js";
+ import { v4 as uuidv4 } from 'uuid'; // For generating IDs
+
+ const __filename = fileURLToPath(import.meta.url);
+ const __dirname = path.dirname(__filename);
+
+ const PORT = process.env.PORT || 3001;
+ const INITIAL_PROMPT_FILE = 'initial_prompt.txt';
+
+ // --- Game State ---
+ // Simple in-memory storage. For a real MMO, use a database.
+ const gameState = {
+     souls: {}, // { soulId: { id, name, locationId, inventory: [artifactId1, artifactId2] } }
+     locations: {}, // { locationId: { id, name, description, exits: {north: locationId2, ...} } }
+     artifacts: {}, // { artifactId: { id, name, description, linkedToolName } }
+     worldLog: ["Welcome to the Infinite MMORPG!"],
+ };
+
+ // --- Server Setup ---
+ const httpServer = createServer();
+ const io = new Server(httpServer, {
+     cors: {
+         origin: "*", // Allow connections from anywhere for simplicity
+         methods: ["GET", "POST"]
+     }
+ });
+
+ const toolManager = new ToolCreationManager();
+
+ // --- Game Logic Functions ---
+ // These are examples of functions the LLM *could* create via tools.
+ // They interact directly with the gameState. They should return descriptive strings.
+
+ function _internal_create_soul(params) {
+      const { name, locationId, type = 'generic' } = params;
+      if (!name || !locationId) return "Error: Missing name or locationId for create_soul.";
+      if (!gameState.locations[locationId]) return `Error: Location '${locationId}' not found.`;
+      const soulId = uuidv4();
+      gameState.souls[soulId] = {
+          id: soulId,
+          name: name,
+          locationId: locationId,
+          inventory: [], // List of artifact IDs
+          type: type // 'player', 'npc', 'generic'
+      };
+      logToWorld(`A new soul named '${name}' appeared in ${gameState.locations[locationId].name}.`);
+      return `Soul '${name}' (ID: ${soulId}) created successfully at location ${locationId}.`;
+ }
+
+ function _internal_create_location(params) {
+      const { name, description } = params;
+      if (!name || !description) return "Error: Missing name or description for create_location.";
+      const locationId = name.toLowerCase().replace(/\s+/g, '_'); // Simple ID generation
+       if(gameState.locations[locationId]) return `Error: Location with ID '${locationId}' already exists.`
+      gameState.locations[locationId] = {
+          id: locationId,
+          name: name,
+          description: description,
+          exits: {} // { direction: targetLocationId }
+      };
+      logToWorld(`A new location called '${name}' was discovered.`);
+      return `Location '${name}' (ID: ${locationId}) created successfully.`;
+ }
+
+ function _internal_link_exit(params) {
+     const { fromLocationId, direction, toLocationId } = params;
+      if (!fromLocationId || !direction || !toLocationId) return "Error: Missing parameters for link_exit.";
+      if (!gameState.locations[fromLocationId]) return `Error: Origin location '${fromLocationId}' not found.`;
+      if (!gameState.locations[toLocationId]) return `Error: Destination location '${toLocationId}' not found.`;
+
+      gameState.locations[fromLocationId].exits[direction.toLowerCase()] = toLocationId;
+      logToWorld(`A path opened from ${gameState.locations[fromLocationId].name} ${direction} to ${gameState.locations[toLocationId].name}.`);
+      return `Exit '${direction}' added from ${fromLocationId} to ${toLocationId}.`;
+ }
+
+
+ function _internal_create_artifact(params) {
+      const { name, description, linkedToolName } = params;
+      if (!name || !description || !linkedToolName) return "Error: Missing name, description, or linkedToolName for create_artifact.";
+      // Optional: Check if linkedToolName exists in toolManager?
+      const artifactId = uuidv4();
+      gameState.artifacts[artifactId] = {
+          id: artifactId,
+          name: name,
+          description: description,
+          linkedToolName: linkedToolName
+      };
+      logToWorld(`A powerful artifact known as '${name}' has materialized.`);
+      return `Artifact '${name}' (ID: ${artifactId}) created, linked to tool '${linkedToolName}'.`;
+ }
+
+ function _internal_give_artifact_to_soul(params) {
+     const { soulId, artifactId } = params;
+      if (!soulId || !artifactId) return "Error: Missing soulId or artifactId for give_artifact.";
+      if (!gameState.souls[soulId]) return `Error: Soul '${soulId}' not found.`;
+      if (!gameState.artifacts[artifactId]) return `Error: Artifact '${artifactId}' not found.`;
+
+      if (!gameState.souls[soulId].inventory.includes(artifactId)) {
+          gameState.souls[soulId].inventory.push(artifactId);
+          logToWorld(`${gameState.souls[soulId].name} obtained the artifact '${gameState.artifacts[artifactId].name}'.`);
+          return `Artifact '${gameState.artifacts[artifactId].name}' given to soul '${gameState.souls[soulId].name}'.`;
+      } else {
+          return `Warning: Soul '${gameState.souls[soulId].name}' already possesses artifact '${gameState.artifacts[artifactId].name}'.`;
+      }
+ }
+
+ function _internal_move_soul(params) {
+     const { soulId, targetLocationId } = params;
+     if (!soulId || !targetLocationId) return "Error: Missing soulId or targetLocationId for move_soul.";
+     const soul = gameState.souls[soulId];
+     if (!soul) return `Error: Soul '${soulId}' not found.`;
+     const currentLocation = gameState.locations[soul.locationId];
+     const targetLocation = gameState.locations[targetLocationId];
+     if (!targetLocation) return `Error: Target location '${targetLocationId}' not found.`;
+
+     // Basic check: Is the target location directly reachable? (Could be enhanced by tool logic)
+     let reachable = false;
+     if (currentLocation && currentLocation.exits) {
+         reachable = Object.values(currentLocation.exits).includes(targetLocationId);
+     }
+     // Allow moving even if not directly connected for flexibility / initial setup
+     // A real game might have the 'move' tool check exits itself.
+     // if (!reachable) return `Error: Cannot move from ${currentLocation?.name || 'unknown'} to ${targetLocation.name}. No direct path.`;
+
+
+     const oldLocationName = currentLocation?.name || 'an unknown place';
+     soul.locationId = targetLocationId;
+     logToWorld(`${soul.name} moved from ${oldLocationName} to ${targetLocation.name}.`);
+     return `${soul.name} moved successfully to ${targetLocation.name}.`;
+ }
+
+ // More potential internal functions: describe_location, look_around, etc.
+
+
+ // --- Utility Functions ---
+ function logToWorld(message) {
+     console.log("[WORLD]", message);
+     gameState.worldLog.push(message);
+     if (gameState.worldLog.length > 50) { // Keep log size manageable
+         gameState.worldLog.shift();
+     }
+     // Broadcast important world events? Maybe too noisy.
+     // io.emit('gameStateUpdate', getFilteredGameState());
+ }
+
+ function sendDebugInfo(socket, message) {
+     if (socket) {
+         socket.emit('debugInfo', `[SERVER DEBUG] ${message}`);
+     } else {
+         io.emit('debugInfo', `[SERVER DEBUG] ${message}`); // Broadcast if no specific socket
+     }
+     console.log(`[DEBUG] ${message}`);
+ }
+
+ async function processInitialPrompt() {
+     sendDebugInfo(null, `Processing initial prompt file: ${INITIAL_PROMPT_FILE}`);
+     try {
+         const promptContent = await fs.readFile(INITIAL_PROMPT_FILE, 'utf-8');
+         const lines = promptContent.split('\n').filter(line => line.trim() && !line.trim().startsWith('#'));
+
+         for (const line of lines) {
+             const trimmedLine = line.trim();
+             sendDebugInfo(null, `Processing line: ${trimmedLine}`);
+
+             if (trimmedLine.toUpperCase().startsWith('CREATE TOOL')) {
+                 // Expect format: CREATE TOOL name='...' description='...' parameters='{...}'
+                 const nameMatch = trimmedLine.match(/name='([^']+)'/);
+                 const descMatch = trimmedLine.match(/description='([^']+)'/);
+                 const paramsMatch = trimmedLine.match(/parameters='({.*})'/);
+
+                 if (nameMatch && descMatch && paramsMatch) {
+                     const name = nameMatch[1];
+                     const description = descMatch[1];
+                     try {
+                         const parameters = JSON.parse(paramsMatch[1]);
+                         sendDebugInfo(null, `Attempting to create tool '${name}' via tool_creation...`);
+                         // Use the *internal* execution path for tool_creation
+                         const result = await toolManager.executeTool('tool_creation', {
+                             new_tool_name: name,
+                             new_tool_description: description,
+                             new_tool_parameters: parameters
+                         });
+                         sendDebugInfo(null, `Tool creation result for '${name}': ${result}`);
+                         if (result.startsWith("Error:")) {
+                             console.error(`Failed to process initial prompt line: ${line}\nError: ${result}`);
+                             // Decide whether to stop or continue on error
+                         }
+                     } catch (jsonError) {
+                         console.error(`Failed to parse parameters JSON in line: ${line}\nError: ${jsonError}`);
+                     }
+                 } else {
+                     console.error(`Invalid CREATE TOOL format in line: ${line}`);
+                 }
+             } else if (trimmedLine.toUpperCase().startsWith('EXECUTE TOOL')) {
+                 // Expect format: EXECUTE TOOL name='...' args='{...}'
+                 const nameMatch = trimmedLine.match(/name='([^']+)'/);
+                 const argsMatch = trimmedLine.match(/args='({.*})'/);
+
+                 if (nameMatch && argsMatch) {
+                     const name = nameMatch[1];
+                     try {
+                         const args = JSON.parse(argsMatch[1]);
+                         sendDebugInfo(null, `Attempting to execute tool '${name}' with args: ${JSON.stringify(args)}`);
+
+                         // Check for internal game logic functions first (bootstrap optimization)
+                         let result;
+                         switch (name) {
+                             case 'create_soul': result = _internal_create_soul(args); break;
+                             case 'create_location': result = _internal_create_location(args); break;
+                              case 'link_exit': result = _internal_link_exit(args); break;
+                             case 'create_artifact': result = _internal_create_artifact(args); break;
+                             case 'give_artifact_to_soul': result = _internal_give_artifact_to_soul(args); break;
+                             case 'move_soul': result = _internal_move_soul(args); break;
+                             // Add other internal bootstrap functions if needed
+                             default:
+                                 // If not internal, execute via ToolManager
+                                 result = await toolManager.executeTool(name, args);
+                         }
+
+                         sendDebugInfo(null, `Tool execution result for '${name}': ${result}`);
+                         if (result.startsWith("Error:")) {
+                             console.error(`Failed execution in initial prompt line: ${line}\nError: ${result}`);
+                             // Decide whether to stop or continue
+                         }
+                          // Potentially update game state based on non-internal tool results if they modify state directly
+                          // This requires careful design of the tools created by the LLM.
+                          // For now, we primarily rely on the internal functions for bootstrap state changes.
+
+                     } catch (jsonError) {
+                         console.error(`Failed to parse args JSON in line: ${line}\nError: ${jsonError}`);
+                     }
+                 } else {
+                     console.error(`Invalid EXECUTE TOOL format in line: ${line}`);
+                 }
+             } else {
+                 console.warn(`Skipping unrecognized line in initial prompt: ${line}`);
+             }
+              await new Promise(resolve => setTimeout(resolve, 100)); // Small delay between commands
+         }
+         sendDebugInfo(null, "Finished processing initial prompt.");
+     } catch (error) {
+         console.error(`Error processing initial prompt file ${INITIAL_PROMPT_FILE}:`, error);
+         // Decide if the server should start even if the prompt fails
+     }
+ }
+
+
+ // --- Socket Connection Handling ---
+ io.on("connection", async (socket) => {
+     console.log(`Socket connected: ${socket.id}`);
+     sendDebugInfo(socket, `Connection established: ${socket.id}`);
+
+     // --- Player Soul Creation/Assignment ---
+     // Simple: create a new soul for each connection for this example
+     let playerSoulId = null;
+     try {
+          const creationParams = { name: `Player_${socket.id.substring(0, 5)}`, locationId: 'town_square' }; // Default start location
+          const creationResult = _internal_create_soul(creationParams);
+          sendDebugInfo(socket, `Soul creation attempt result: ${creationResult}`);
+          // Extract ID from result (basic parsing, might need refinement)
+          const idMatch = creationResult.match(/ID: ([a-f0-9-]+)/);
+          if (idMatch) {
+              playerSoulId = idMatch[1];
+              gameState.souls[playerSoulId].type = 'player'; // Mark as player controlled
+              socket.emit('assignSoulId', playerSoulId); // Tell client its ID
+              sendDebugInfo(socket, `Assigned player soul ID: ${playerSoulId}`);
+          } else {
+              throw new Error(`Could not extract soul ID from creation result: ${creationResult}`);
+          }
+
+         // Send initial state AFTER soul is created
+         socket.emit('gameStateUpdate', getFilteredGameStateForSoul(playerSoulId));
+         await sendAvailableActions(socket, playerSoulId);
+
+     } catch (error) {
+         console.error("Error creating player soul:", error);
+         sendDebugInfo(socket, `Error setting up player: ${error.message}`);
+         socket.disconnect(true); // Disconnect if setup fails
+         return;
+     }
+
+
+     // --- Event Listeners ---
+     socket.on("disconnect", () => {
+         console.log(`Socket disconnected: ${socket.id}`);
+         if (playerSoulId && gameState.souls[playerSoulId]) {
+             logToWorld(`${gameState.souls[playerSoulId].name} has disconnected.`);
+             // Optional: Remove player soul or mark as disconnected NPC?
+             // delete gameState.souls[playerSoulId];
+             // For this example, we leave them in the world.
+             broadcastGameState(); // Update others
+         }
+     });
+
+     socket.on("performAction", async (data) => {
+         const { artifactId, args } = data; // Expecting artifactId and potential extra args
+         const soulId = playerSoulId; // Action is performed by the player soul associated with this socket
+
+         if (!soulId || !gameState.souls[soulId]) {
+             sendDebugInfo(socket, "Error: Cannot perform action, soul not found.");
+             return;
+         }
+         if (!artifactId) {
+              sendDebugInfo(socket, "Error: No artifactId provided for action.");
+              return;
+         }
+
+         const soul = gameState.souls[soulId];
+         const artifact = gameState.artifacts[artifactId];
+
+         if (!soul.inventory.includes(artifactId) || !artifact) {
+             sendDebugInfo(socket, `Error: Soul ${soul.name} does not possess artifact '${artifact?.name || artifactId}' or artifact invalid.`);
+             socket.emit('actionResult', { success: false, message: `You don't have the required artifact '${artifact?.name || artifactId}'.` });
+             return;
+         }
+
+         const toolName = artifact.linkedToolName;
+         if (!toolName) {
+              sendDebugInfo(socket, `Error: Artifact '${artifact.name}' is not linked to any tool.`);
+              socket.emit('actionResult', { success: false, message: `Artifact '${artifact.name}' seems inert.` });
+             return;
+         }
+
+         // --- Prepare Arguments for the Tool ---
+         // Include the soul performing the action and potentially other context
+         const toolArgs = {
+              soulId: soulId, // Let the tool know who is acting
+              locationId: soul.locationId, // Let the tool know where the action happens
+              ...(args || {}) // Include any args sent from the client (e.g., target ID, direction)
+         };
+
+
+         sendDebugInfo(socket, `Executing tool '${toolName}' via artifact '${artifact.name}' for soul ${soulId} with args: ${JSON.stringify(toolArgs)}`);
+
+         try {
+             const executionResult = await toolManager.executeTool(toolName, toolArgs);
+             sendDebugInfo(socket, `Tool '${toolName}' execution result: ${executionResult}`);
+
+             // --- Process Result ---
+             // The tool's return string *is* the primary way it communicates outcomes.
+             // We can check if it starts with "Error:"
+             const success = !executionResult.startsWith("Error:");
+             socket.emit('actionResult', { success: success, message: executionResult });
+
+             // If successful, update game state *based on the assumed effects described by the tool name/result*.
+             // This is where the coupling between tool intent and server state happens.
+             // More robust: Tools could return structured data, but string is per requirement.
+             // We *could* re-parse the result string, but that's fragile.
+             // Example: If a 'move' tool succeeded, the internal _internal_move_soul ALREADY updated state.
+             // If an LLM-generated tool modified state, its *code* should have interacted with gameState (if passed in or globally accessible - risky!).
+             // For now, assume internal bootstrap functions handle state for known actions. LLM tools primarily describe.
+             // *** Key Decision: For this example, let's assume LLM tools primarily RETURN STRINGS,
+             // and ONLY the predefined _internal_ functions directly modify gameState for simplicity/safety.
+             // OR, pass gameState reference to executed tools (complex and risky). Let's stick to internal functions for state changes initially.
+
+             if (success) {
+                  // State might have been changed by an *internal* function called via a tool.
+                  // Re-broadcast the potentially changed state.
+                 broadcastGameState(); // Update everyone
+                 await sendAvailableActions(socket, soulId); // Update acting player's actions
+             } else {
+                  // Maybe only send updated actions if the error didn't prevent future actions
+                  await sendAvailableActions(socket, soulId);
+             }
+
+         } catch (error) {
+             console.error(`Critical error during tool execution via performAction for tool ${toolName}:`, error);
+             sendDebugInfo(socket, `System Error executing tool ${toolName}: ${error.message}`);
+             socket.emit('actionResult', { success: false, message: `A critical error occurred while performing the action.` });
+              await sendAvailableActions(socket, soulId); // Still send actions
+         }
+     });
+
+     // Request to get game state manually (e.g., after reconnect)
+     socket.on('requestState', () => {
+          if(playerSoulId){
+              socket.emit('gameStateUpdate', getFilteredGameStateForSoul(playerSoulId));
+              sendAvailableActions(socket, playerSoulId);
+          }
+     });
+ });
+
+
+ // --- Game State Broadcasting ---
+ function getFilteredGameStateForSoul(soulId) {
+     const soul = gameState.souls[soulId];
+     if (!soul) return { error: "Soul not found" };
+
+     const currentLoc = gameState.locations[soul.locationId];
+
+     // Souls visible in the same location
+     const visibleSouls = Object.values(gameState.souls)
+         .filter(s => s.locationId === soul.locationId)
+         .map(s => ({ id: s.id, name: s.name, type: s.type })); // Don't send inventory
+
+     // Artifacts in the player's inventory
+     const inventoryDetails = soul.inventory
+          .map(id => gameState.artifacts[id])
+          .filter(Boolean); // Filter out invalid IDs
+
+     return {
+         playerSoul: { id: soul.id, name: soul.name, locationId: soul.locationId },
+         currentLocation: currentLoc ? {
+             name: currentLoc.name,
+             description: currentLoc.description,
+             exits: currentLoc.exits // Send available exits
+         } : { name: "The Void", description: "Lost in space...", exits: {} },
+         visibleSouls: visibleSouls,
+         inventory: inventoryDetails, // Send artifact details { id, name, description, linkedToolName }
+         worldLog: gameState.worldLog.slice(-10) // Send recent log entries
+     };
+ }
+
+ function broadcastGameState() {
+     // Send personalized state to each player
+     Object.values(gameState.souls).forEach(soul => {
+         if (soul.type === 'player') {
+              const playerSocket = io.sockets.sockets.get(soul.id.replace('Player_','')); // Hacky way to find socket by player name pattern
+             // This is unreliable. Better: store socket ID with soul state.
+             // For now, we'll broadcast a generic state update trigger
+             io.emit('gameStateUpdateNeeded'); // Tell clients to request fresh state
+         }
+     });
+      // Simplified: just tell all clients to request new state
+      io.emit('requestState'); // Ask all clients to re-request their state
+ }
+
+ io.on('connection', (socket) => {
+     // ... existing connection logic ...
+
+     socket.on('requestState', () => {
+          // Find the soulId associated with this socket (need to store this on connection)
+          const soulId = socket.data.soulId; // Assumes we store it like this: socket.data.soulId = playerSoulId;
+          if (soulId) {
+              socket.emit('gameStateUpdate', getFilteredGameStateForSoul(soulId));
+              sendAvailableActions(socket, soulId);
+          } else {
+              sendDebugInfo(socket, "RequestState received but no soulId associated with socket.");
+          }
+     });
+
+     // Modify connection logic to store soulId:
+      // ... after playerSoulId is assigned ...
+      socket.data.soulId = playerSoulId; // Store it here
+      // ... rest of connection logic ...
+
+ });
+
+ // --- Action Handling ---
+ async function sendAvailableActions(socket, soulId) {
+     if (!soulId || !gameState.souls[soulId]) return;
+
+     const soul = gameState.souls[soulId];
+     const availableActions = [];
+
+     // Actions are derived from artifacts in inventory
+     for (const artifactId of soul.inventory) {
+         const artifact = gameState.artifacts[artifactId];
+         if (artifact && artifact.linkedToolName) {
+             // Maybe get tool description from tool manager for better display name?
+             // const toolDef = await toolManager.getToolDefinition(artifact.linkedToolName);
+              // const description = toolDef?.description || artifact.description;
+
+             availableActions.push({
+                 artifactId: artifact.id, // ID of the artifact to use
+                 toolName: artifact.linkedToolName, // The tool this artifact triggers
+                 name: artifact.name, // Display name for the action (use artifact name)
+                 description: artifact.description, // Artifact description
+                 // Parameters might be needed from client for some tools (e.g., target ID)
+                 // We need the tool's parameter schema here.
+                 // parameters: toolDef?.parameters?.properties ? Object.keys(toolDef.parameters.properties) : []
+                 // For simplicity now, assume args are handled contextually or not needed from client directly
+             });
+         }
+     }
+
+     // Add generic actions? Like "Look"? This could also be an artifact/tool.
+     // Example: Add a "look" action if a "look" tool exists and the player has a corresponding artifact.
+
+     sendDebugInfo(socket, `Sending ${availableActions.length} available actions for soul ${soulId}.`);
+     socket.emit('availableActions', availableActions);
+ }
+
+ // --- Initialization and Startup ---
+ async function main() {
+     console.log("Initializing server...");
+     try {
+         await toolManager.initialize();
+         console.log("Tool Manager initialized.");
+
+         await processInitialPrompt(); // Bootstrap the world
+         console.log("Initial prompt processed.");
+
+         // Simple game loop for potential NPC actions (if any NPCs exist)
+         setInterval(() => {
+             Object.values(gameState.souls).forEach(soul => {
+                 if (soul.type !== 'player' && Math.random() < 0.1) { // 10% chance per interval
+                     // Basic NPC action: maybe move randomly if they have a move artifact?
+                     const moveArtifact = soul.inventory.map(id => gameState.artifacts[id]).find(a => a?.linkedToolName === 'move_soul'); // Example tool name
+                     if (moveArtifact) {
+                         const currentLocation = gameState.locations[soul.locationId];
+                         if (currentLocation && Object.keys(currentLocation.exits).length > 0) {
+                             const exits = Object.values(currentLocation.exits);
+                             const targetLocationId = exits[Math.floor(Math.random() * exits.length)];
+                             const args = { soulId: soul.id, targetLocationId: targetLocationId };
+                              sendDebugInfo(null, `NPC ${soul.name} attempting automated move to ${targetLocationId}`);
+                              // Execute directly using internal function for reliability in this simple loop
+                              const result = _internal_move_soul(args);
+                              sendDebugInfo(null, `NPC move result: ${result}`);
+                              if (!result.startsWith('Error:')) {
+                                  broadcastGameState();
+                              }
+                         }
+                     }
+                 }
+             });
+         }, 10000); // Every 10 seconds
+
+
+         httpServer.listen(PORT, () => {
+             console.log(`Server listening on port ${PORT}`);
+             console.log(`Game world accessible via client pointed at ws://localhost:${PORT}`);
+         });
+
+     } catch (error) {
+         console.error("Server failed to start:", error);
+         process.exit(1);
+     }
+ }
+
+ main();
+content_copy
+download
+Use code with caution.JavaScript
+7. public/index.html:
+<!DOCTYPE html>
+ <html>
+ <head>
+     <title>Infinite MMORPG</title>
+     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+     <style>
+         body { font-family: sans-serif; display: flex; flex-direction: column; height: 100vh; margin: 0; background-color: #f0f0f0; }
+         #game-container { flex-grow: 1; display: flex; flex-direction: column; padding: 10px; overflow: hidden; }
+         #log-area { flex-basis: 60%; background-color: #fff; border: 1px solid #ccc; padding: 10px; overflow-y: scroll; margin-bottom: 10px; font-size: 0.9em; }
+         #log-area p { margin: 2px 0; }
+         #status-area { font-size: 0.9em; margin-bottom: 10px; padding: 5px; background-color: #e9e9e9; border-radius: 4px;}
+         #action-area { flex-basis: 35%; overflow-y: auto; background-color: #fff; border: 1px solid #ccc; padding: 10px; }
+         #action-buttons button { display: block; width: 95%; margin: 5px auto; padding: 10px 15px; font-size: 1em; cursor: pointer; background-color: #4CAF50; color: white; border: none; border-radius: 5px; text-align: left; }
+          #action-buttons button:hover { background-color: #45a049; }
+          #action-buttons button .desc { font-size: 0.8em; color: #e0e0e0; display: block; margin-top: 3px;}
+         #debug-area { position: fixed; bottom: 0; right: 0; background: rgba(0,0,0,0.7); color: lime; font-family: monospace; font-size: 0.7em; max-height: 100px; overflow-y: scroll; padding: 5px; max-width: 300px; opacity: 0.8; z-index: 100;}
+          h3 {margin-top: 0; margin-bottom: 5px; text-align: center; border-bottom: 1px solid #ccc; padding-bottom: 5px;}
+     </style>
+     <script src="/socket.io/socket.io.js"></script>
+ </head>
+ <body>
+     <div id="game-container">
+         <div id="log-area">
+             <h3>World Log</h3>
+             <div id="log-content"></div>
+         </div>
+         <div id="status-area">
+              Loading...
+         </div>
+         <div id="action-area">
+             <h3>Available Actions</h3>
+             <div id="action-buttons">
+                 <!-- Action buttons will be generated here -->
+             </div>
+         </div>
+     </div>
+      <div id="debug-area">
+          <div id="debug-content"></div>
+      </div>
+
+     <script>
+         const socket = io(); // Defaults to connect to the host that serves the page
+
+         const logContent = document.getElementById('log-content');
+         const statusArea = document.getElementById('status-area');
+         const actionButtons = document.getElementById('action-buttons');
+         const debugContent = document.getElementById('debug-content');
+
+         let playerSoulId = null;
+         let currentGameState = {};
+
+         function addLogMessage(message, type = 'info') {
+             const p = document.createElement('p');
+             p.textContent = message;
+             if (type === 'error') p.style.color = 'red';
+             if (type === 'success') p.style.color = 'green';
+             logContent.appendChild(p);
+             logContent.scrollTop = logContent.scrollHeight; // Auto-scroll
+         }
+
+         function addDebugMessage(message) {
+             const d = document.createElement('div');
+             d.textContent = message;
+             debugContent.appendChild(d);
+             debugContent.scrollTop = debugContent.scrollHeight; // Auto-scroll
+         }
+
+         function updateStatus(state) {
+              if (!state || !state.playerSoul || !state.currentLocation) {
+                  statusArea.innerHTML = "Waiting for server data...";
+                  return;
+              }
+              currentGameState = state; // Store the latest state
+
+              let statusHTML = `
+                  <strong>${state.playerSoul.name}</strong> (ID: ${state.playerSoul.id})<br>
+                  Location: <strong>${state.currentLocation.name}</strong><br>
+                  <em>${state.currentLocation.description}</em><br>
+                  Exits: ${Object.entries(state.currentLocation.exits || {}).map(([dir, loc]) => `${dir}: ${loc}`).join(', ') || 'None'} <br>
+                   Visible Souls: ${state.visibleSouls ? state.visibleSouls.map(s => s.name + (s.id === playerSoulId ? ' (You)' : '')).join(', ') : 'None'} <br>
+                  Inventory: ${state.inventory ? state.inventory.map(a => a.name).join(', ') || 'Empty'}
+              `;
+              statusArea.innerHTML = statusHTML;
+         }
+
+         function updateLog(logEntries) {
+              if (!logEntries) return;
+              logContent.innerHTML = ''; // Clear old log
+              logEntries.forEach(msg => addLogMessage(msg));
+         }
+
+
+         function renderActions(actions) {
+             actionButtons.innerHTML = ''; // Clear existing buttons
+             if (!actions || actions.length === 0) {
+                 actionButtons.innerHTML = '<p>No actions available.</p>';
+                 return;
+             }
+
+             actions.forEach(action => {
+                 const button = document.createElement('button');
+                 button.dataset.artifactId = action.artifactId; // Store artifact ID on the button
+                  button.dataset.toolName = action.toolName; // Store tool name
+
+                 // Display artifact name and description
+                 button.innerHTML = `${action.name} <span class="desc">${action.description || '(Use Artifact)'}</span>`;
+
+                 button.onclick = () => {
+                     addDebugMessage(`Clicked action: ${action.name} (Artifact: ${action.artifactId}, Tool: ${action.toolName})`);
+                     // Simple argument handling: Prompt if the tool *might* need it.
+                     // This is basic. A better approach would check the tool's parameter schema.
+                     let args = {};
+                     // Example: If tool name suggests targeting (e.g., 'attack_soul', 'give_item')
+                     if (action.toolName.includes('target') || action.toolName.includes('give') || action.toolName.includes('soul') && !action.toolName.includes('move_soul')) {
+                         const targetId = prompt(`Enter target ID for action '${action.name}':`);
+                         if (targetId === null) return; // User cancelled
+                          args.targetSoulId = targetId; // Assuming 'targetSoulId' is a common param name
+                     }
+                     if (action.toolName.includes('direction') || action.toolName.includes('move')) {
+                           const direction = prompt(`Enter direction for action '${action.name}' (e.g., north, south, east, west, up, down):`);
+                           if (direction === null || direction.trim() === '') return; // User cancelled or entered nothing
+                           args.direction = direction.toLowerCase();
+                       }
+                       // Add more potential generic arg prompts here based on tool names/conventions
+
+                     socket.emit('performAction', {
+                         artifactId: action.artifactId,
+                         args: args // Send collected args (might be empty object)
+                     });
+                 };
+                 actionButtons.appendChild(button);
+             });
+         }
+
+
+         // --- Socket Event Handlers ---
+         socket.on('connect', () => {
+             addLogMessage('Connected to the server!', 'success');
+             addDebugMessage(`Connected with socket ID: ${socket.id}`);
+             // Request initial state after connection (server might assign soul first)
+             // The server will send 'assignSoulId' then we can request state.
+         });
+
+         socket.on('disconnect', () => {
+             addLogMessage('Disconnected from the server.', 'error');
+             statusArea.innerHTML = "Disconnected.";
+             actionButtons.innerHTML = '';
+         });
+
+          socket.on('assignSoulId', (id) => {
+              playerSoulId = id;
+              addDebugMessage(`Assigned Player Soul ID: ${playerSoulId}`);
+              // Now that we have an ID, request the initial state
+              socket.emit('requestState');
+          });
+
+         socket.on('gameStateUpdate', (state) => {
+             addDebugMessage('Received gameStateUpdate');
+              // console.log("Received state:", state); // For browser console debugging
+              if (state.error){
+                  addLogMessage(`Server Error: ${state.error}`, 'error');
+                  return;
+              }
+             updateStatus(state);
+             updateLog(state.worldLog);
+         });
+
+         socket.on('availableActions', (actions) => {
+             addDebugMessage(`Received ${actions.length} available actions.`);
+             renderActions(actions);
+         });
+
+         socket.on('actionResult', (result) => {
+              addDebugMessage(`Action Result: Success=${result.success}, Msg=${result.message}`);
+              addLogMessage(result.message, result.success ? 'success' : 'error');
+              // Server should send updated actions/state if needed after an action result
+         });
+
+          socket.on('debugInfo', (message) => {
+              addDebugMessage(message);
+          });
+
+           // Fallback if state isn't pushed immediately or gets out of sync
+          socket.on('requestState', () => {
+                addDebugMessage('Server requested state refresh.');
+               if(playerSoulId) {
+                   socket.emit('requestState'); // Send our request back
+               } else {
+                   addDebugMessage("Cannot request state, playerSoulId not set yet.");
+               }
+           });
+
+
+         // Initial setup message
+         addLogMessage('Attempting to connect to server...');
+
+     </script>
+ </body>
+ </html>
+content_copy
+download
+Use code with caution.Html
+8. initial_prompt.txt:
+# Initial world setup using the tool_creation_tool and subsequent execution
+ # Comments start with #
+
+ # --- CORE TOOL DEFINITIONS ---
+
+ CREATE TOOL name='create_location' description='Creates a new location in the game world. Returns a confirmation message.' parameters='{"type":"object", "properties": {"name": {"type": "string", "description": "The display name for the location."}, "description": {"type": "string", "description": "A textual description of the location."}}, "required": ["name", "description"]}'
+ CREATE TOOL name='link_exit' description='Creates a one-way exit from one location to another in a specific direction. Returns a confirmation message.' parameters='{"type":"object", "properties": {"fromLocationId": {"type": "string", "description": "The ID (lowercase_name) of the starting location."}, "direction": {"type": "string", "description": "The direction of the exit (e.g., north, south, east, west, up, down)."}, "toLocationId": {"type": "string", "description": "The ID (lowercase_name) of the destination location."}}, "required": ["fromLocationId", "direction", "toLocationId"]}'
+ CREATE TOOL name='create_soul' description='Creates a new soul (player or NPC) in a specific location. Returns a confirmation message including the new soul ID.' parameters='{"type":"object", "properties": {"name": {"type": "string", "description": "The name of the soul."}, "locationId": {"type": "string", "description": "The ID of the location where the soul should appear."}, "type": {"type": "string", "description": "Type of soul (e.g., generic, npc, player)", "default": "generic"}}, "required": ["name", "locationId"]}'
+ CREATE TOOL name='create_artifact' description='Creates a new artifact item that can be linked to a tool. Returns a confirmation message including the new artifact ID.' parameters='{"type":"object", "properties": {"name": {"type": "string", "description": "The name of the artifact."}, "description": {"type": "string", "description": "A description of the artifact and its purpose."}, "linkedToolName": {"type": "string", "description": "The exact name of the tool this artifact allows the user to execute."}}, "required": ["name", "description", "linkedToolName"]}'
+ CREATE TOOL name='give_artifact_to_soul' description='Gives a specific artifact to a specific soul. Returns a confirmation message.' parameters='{"type":"object", "properties": {"soulId": {"type": "string", "description": "The ID of the soul receiving the artifact."}, "artifactId": {"type": "string", "description": "The ID of the artifact being given."}}, "required": ["soulId", "artifactId"]}'
+ CREATE TOOL name='move_soul' description='Moves a soul to a target location. Requires the soul to have an artifact linked to this tool. Checks for valid locations. Returns result message.' parameters='{"type":"object", "properties": {"soulId": {"type": "string", "description": "The ID of the soul to move (usually the one performing the action)."}, "targetLocationId": {"type": "string", "description": "The ID of the location to move to."}}, "required": ["soulId", "targetLocationId"]}'
+ CREATE TOOL name='describe_location' description='Provides a description of the specified location, including visible souls and exits. Returns the description as a string.' parameters='{"type":"object", "properties": {"locationId": {"type": "string", "description": "The ID of the location to describe."}}, "required": ["locationId"]}'
+ CREATE TOOL name='look_around' description='Describes the current location of the acting soul, including exits and other souls present. Returns the description string.' parameters='{"type":"object", "properties": {"soulId": {"type": "string", "description": "The ID of the soul looking around."}}, "required": ["soulId"]}'
+
+
+ # --- WORLD BUILDING ---
+
+ # Execute the tools created above to build the initial state
+ # Note: We use the internal functions in server.js for bootstrapping these core elements for reliability.
+ # The LLM *could* generate these functions, but using internals is safer for setup.
+ # These EXECUTE commands tell the server's initial prompt processor to use the internal versions.
+
+ EXECUTE TOOL name='create_location' args='{"name": "Town Square", "description": "A bustling square paved with cobblestones. A fountain bubbles in the center."}'
+ EXECUTE TOOL name='create_location' args='{"name": "Shady Alley", "description": "A narrow, dark alley smelling faintly of refuse. Shadows cling to the corners."}'
+ EXECUTE TOOL name='create_location' args='{"name": "General Store", "description": "A shop filled with various goods. Shelves line the walls, stocked with essentials and trinkets. A merchant eyes you."}'
+
+ EXECUTE TOOL name='link_exit' args='{"fromLocationId": "town_square", "direction": "north", "toLocationId": "general_store"}'
+ EXECUTE TOOL name='link_exit' args='{"fromLocationId": "general_store", "direction": "south", "toLocationId": "town_square"}'
+ EXECUTE TOOL name='link_exit' args='{"fromLocationId": "town_square", "direction": "east", "toLocationId": "shady_alley"}'
+ EXECUTE TOOL name='link_exit' args='{"fromLocationId": "shady_alley", "direction": "west", "toLocationId": "town_square"}'
+
+ # Create an NPC
+ EXECUTE TOOL name='create_soul' args='{"name": "Bob the Merchant", "locationId": "general_store", "type": "npc"}'
+ # Let BobId be the result of the above command (Server needs to handle this - currently returns string, need to parse ID)
+ # Example Placeholder ID for Bob: assuming it's 'bob_merchant_id' after creation
+ # Let's assume the server internally stores the last created ID or the prompt processor handles ID passing.
+ # For now, manual placeholder - replace with actual ID parsing/handling if possible.
+
+
+ # --- ARTIFACTS AND ACTIONS ---
+
+ # Create artifacts linked to the tools
+ EXECUTE TOOL name='create_artifact' args='{"name": "Boots of Walking", "description": "These boots allow movement between adjacent locations.", "linkedToolName": "move_soul"}'
+ EXECUTE TOOL name='create_artifact' args='{"name": "Amulet of Observation", "description": "Focus your senses to observe your surroundings.", "linkedToolName": "look_around"}'
+
+ # Give artifacts to souls (e.g., the initial player soul created on connection, and NPCs)
+ # This part is tricky in the initial prompt as player soul ID isn't known yet.
+ # The server logic assigns artifacts to new players on connection or players find them.
+ # We can give artifacts to the NPC Bob here (assuming we got his ID).
+ # EXECUTE TOOL name='give_artifact_to_soul' args='{"soulId": "bob_merchant_id", "artifactId": "amulet_of_observation_id"}' # Requires artifact ID to be parsed too
+
+
+ # --- Addendum: Server should give new players "Boots of Walking" and "Amulet of Observation" ---
+ # This instruction isn't a command, but a note for server logic implementation.
+content_copy
+download
+Use code with caution.Text
+9. README.md:
+# Infinite MMORPG - LLM Tool Creation Demo
+
+ This project demonstrates a dynamic game world where game actions and potentially even content are created and managed by a Large Language Model (LLM) using a "Tool Creation Tool".
+
+ The core idea is that the LLM isn't just a content generator but an active participant that can define *new capabilities (tools/functions)* for itself and the game entities on the fly. These tools are stored in a RAG (Retrieval-Augmented Generation) system using ChromaDB and Ollama embeddings, allowing the LLM or game engine to find and execute relevant tools based on context.
+
+ The MMORPG is a simple example application showcasing this concept. Players connect, receive available actions (derived from artifacts they possess), and perform those actions. Actions trigger tools linked to artifacts, which are executed on the server. NPCs can also use artifacts/tools.
+
+ ## Key Concepts
+
+ *   **`tool_creation_tool`**: An initial, fundamental tool provided to the LLM. Its sole purpose is to allow the LLM to define *other* tools by providing a name, description, and parameter schema. The LLM then generates the JavaScript function code for the new tool.
+ *   **Dynamic Tool Generation**: The LLM uses `tool_creation_tool` to create new functions (e.g., `move_entity`, `create_item`, `cast_spell`).
+ *   **RAG (ChromaDB + Ollama Embeddings)**: Newly created tools (their code and descriptions) are stored in ChromaDB. The description is embedded using Ollama (`nomic-embed-text`) to enable semantic searching.
+ *   **Contextual Tool Retrieval**: When an action needs to be performed or possibilities explored, the system queries ChromaDB based on the current context (e.g., "player wants to move north", "describe the forest") to find relevant tools.
+ *   **Safe Dynamic Execution**: Retrieved tool code (JavaScript strings) is executed safely on the server using `new Function()` wrappers with error handling.
+ *   **Artifact-Driven Actions**: In this MMORPG example, player/NPC actions are primarily driven by possessing "Artifacts". Each artifact is linked to a specific tool created by the LLM. Using the artifact triggers the execution of the corresponding tool. This allows actions without direct LLM intervention for every step, while the LLM still defines the *capabilities*.
+ *   **LLM as Orchestrator/Creator**: The LLM bootstraps the world via an initial prompt, creates the tools, artifacts, and can potentially drive NPC behavior or world events.
+
+ ## Architecture
+
+ 1.  **`tool_creation_tool.js`**: Library managing LLM interaction (Ollama API), ChromaDB storage/retrieval, tool code generation/sanitization, and dynamic execution.
+ 2.  **`server.js`**: Node.js backend using Socket.IO. Manages player connections, game state (in-memory), interacts with `ToolCreationManager` to get/execute tools via artifacts, handles game logic triggered by tools, and broadcasts updates. Processes `initial_prompt.txt` on startup.
+ 3.  **`public/index.html`**: Simple web frontend using Socket.IO client. Connects to the server, displays game state/log, dynamically generates action buttons based on received available actions (artifacts), and sends chosen actions back to the server. Includes a debug panel.
+ 4.  **`initial_prompt.txt`**: Text file containing instructions for the LLM (via `tool_creation_tool`) to create initial tools, locations, souls, artifacts, and link them to set up the game world.
+ 5.  **Ollama**: Runs the LLM (`qwen2.5-coder:7b-instruct-q8_0`) and the embedding model (`nomic-embed-text`).
+ 6.  **ChromaDB**: Vector database storing the tools and their embeddings.
+
+ ## Setup
+
+ 1.  **Prerequisites**:
+     *   Node.js (v18+ recommended)
+     *   npm
+     *   Ollama installed and running (`ollama serve`)
+     *   ChromaDB installed and running (e.g., `pip install chromadb`, then `chroma run --path ./chroma_db_data`)
+ 2.  **Pull Ollama Models**:
+     ```bash
+     ollama pull qwen2.5-coder:7b-instruct-q8_0
+     ollama pull nomic-embed-text
+     ```
+ 3.  **Clone the Repository**:
+     ```bash
+     git clone <repository-url>
+     cd infinite-mmorpg-tool-creator
+     ```
+ 4.  **Install Dependencies**:
+     ```bash
+     chmod +x setup.sh
+     ./setup.sh
+     ```
+     (Or just `npm install`)
+ 5.  **Configure (Optional)**: If Ollama or ChromaDB are running on different hosts/ports, set environment variables:
+     *   `OLLAMA_BASE_URL` (e.g., `http://192.168.1.100:11434`)
+     *   `CHROMA_URL` (e.g., `http://192.168.1.100:8000`)
+     *   `OLLAMA_MODEL`
+     *   `OLLAMA_EMBEDDING_MODEL`
+
+ ## Running
+
+ 1.  Ensure Ollama is running.
+ 2.  Ensure ChromaDB is running.
+ 3.  Start the server:
+     ```bash
+     chmod +x run.sh
+     ./run.sh
+     ```
+     (Or just `node server.js`)
+ 4.  Open `public/index.html` in your web browser (you might need a simple static file server like `npx serve public` or open the file directly, though connecting might require `localhost` if served locally). Alternatively, navigate to `http://localhost:3001` if the server is configured to serve the HTML directly (current setup doesn't do this, use `npx serve .` in the root directory and go to `http://localhost:3000/public/`).
+ 5.  Interact with the game using the dynamically generated action buttons. Observe the log and debug output.
+
+ ## How it Works (Example Flow)
+
+ 1.  **Startup**: `server.js` initializes `ToolCreationManager`, which connects to Ollama/ChromaDB and ensures `tool_creation_tool` exists.
+ 2.  **Bootstrap**: `server.js` reads `initial_prompt.txt`.
+     *   `CREATE TOOL` lines: Calls `toolManager.executeTool('tool_creation', ...)` which uses the LLM to generate code for tools like `move_soul`, `create_artifact`, etc., and stores them in ChromaDB.
+     *   `EXECUTE TOOL` lines: Calls `toolManager.executeTool(...)` for the specified tool (or uses internal server functions for bootstrapping reliability) to create locations, NPCs, artifacts etc., modifying the `gameState`.
+ 3.  **Player Connects**: `server.js` creates a player soul, gives it default starting artifacts (e.g., "Boots of Walking", "Amulet of Observation" - implemented in server connection logic).
+ 4.  **Send State/Actions**: Server sends the player their current location, visible souls, inventory, and available actions (derived from artifacts in inventory).
+ 5.  **Player Action**: Player clicks an action button (e.g., "Boots of Walking").
+ 6.  **Frontend**: Sends `performAction` event with the `artifactId` to the server.
+ 7.  **Server**:
+     *   Receives `performAction`.
+     *   Finds the artifact and its linked `toolName` (e.g., `move_soul`).
+     *   Calls `toolManager.executeTool('move_soul', { soulId: 'player...', targetLocationId: '...' /* maybe prompted */ })`.
+     *   `ToolCreationManager`: Retrieves the code for `move_soul` from ChromaDB.
+     *   `ToolCreationManager`: Executes the retrieved code dynamically.
+     *   The `move_soul` function (either internal or LLM-generated) updates the `gameState` (player's location).
+     *   `ToolCreationManager`: Returns the result string (e.g., "Player moved to Shady Alley.").
+     *   Server receives the result, updates all clients about the state change (player moved), and sends updated available actions to the acting player.
+content_copy
+download
+Use code with caution.Markdown
+Key Considerations & Next Steps:
+Security: Executing LLM-generated code is inherently risky. The current implementation uses new Function() which is safer than eval, but a production system would need robust sandboxing (e.g., using vm2 or running tools in separate, isolated processes/containers). Input/output sanitization is crucial.
+Error Handling: The error handling is basic. More specific error types, better logging, and potentially retries or fallback mechanisms would be needed. Validation of LLM output needs to be more robust.
+State Management: In-memory state is not persistent or scalable. A database (SQL or NoSQL) should replace the gameState object for any real application. Tools would need access to modify this database state, perhaps through a well-defined API passed into their execution context.
+LLM Reliability: LLMs can generate incorrect, inefficient, or buggy code. The tool_creation_tool_prompt needs careful engineering. Validation steps are essential. The LLM might hallucinate parameters or fail to follow instructions precisely.
+ID Management: The initial_prompt.txt processing currently relies on internal functions or assumptions about ID generation/parsing. A robust system would capture IDs returned by creation tools and allow them to be used in subsequent commands within the prompt.
+Artifact Args: The frontend currently uses basic prompts for arguments. A better system would use the tool's parameter schema (retrieved by the server) to dynamically generate specific input fields on the client when an action is selected.
+Scalability: Using ChromaDB/Ollama locally is fine for demos but requires proper deployment for wider use. Socket.IO scaling needs consideration for many users.
+NPC AI: The current NPC logic is trivial (random movement). The LLM could be used more actively here: query available tools for an NPC, ask the LLM to choose an action and parameters based on the NPC's state/goals/environment, and then execute it.
+Tool Chaining/Orchestration: More complex actions might involve the LLM deciding to call multiple tools in sequence. This requires more sophisticated LLM prompting and state management between tool calls.
+This setup provides a solid foundation for experimenting with LLM-driven dynamic tool creation within a game context. Remember to prioritize safety and validation when dealing with dynamically generated and executed code.
+thumb_up
+thumb_down
+add_circle
+arrow_upward_alt
+
+
+

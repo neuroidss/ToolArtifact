@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+ <html>
+ <head>
+     <title>Infinite MMORPG</title>
+     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+     <style>
+         body { font-family: sans-serif; display: flex; flex-direction: column; height: 100vh; margin: 0; background-color: #f0f0f0; }
+         #game-container { flex-grow: 1; display: flex; flex-direction: column; padding: 10px; overflow: hidden; }
+         #log-area { flex-basis: 60%; background-color: #fff; border: 1px solid #ccc; padding: 10px; overflow-y: scroll; margin-bottom: 10px; font-size: 0.9em; }
+         #log-area p { margin: 2px 0; }
+         #status-area { font-size: 0.9em; margin-bottom: 10px; padding: 5px; background-color: #e9e9e9; border-radius: 4px;}
+         #action-area { flex-basis: 35%; overflow-y: auto; background-color: #fff; border: 1px solid #ccc; padding: 10px; }
+         #action-buttons button { display: block; width: 95%; margin: 5px auto; padding: 10px 15px; font-size: 1em; cursor: pointer; background-color: #4CAF50; color: white; border: none; border-radius: 5px; text-align: left; }
+          #action-buttons button:hover { background-color: #45a049; }
+          #action-buttons button .desc { font-size: 0.8em; color: #e0e0e0; display: block; margin-top: 3px;}
+         #debug-area { position: fixed; bottom: 0; right: 0; background: rgba(0,0,0,0.7); color: lime; font-family: monospace; font-size: 0.7em; max-height: 100px; overflow-y: scroll; padding: 5px; max-width: 300px; opacity: 0.8; z-index: 100;}
+          h3 {margin-top: 0; margin-bottom: 5px; text-align: center; border-bottom: 1px solid #ccc; padding-bottom: 5px;}
+     </style>
+     <script src="/socket.io/socket.io.js"></script>
+ </head>
+ <body>
+     <div id="game-container">
+         <div id="log-area">
+             <h3>World Log</h3>
+             <div id="log-content"></div>
+         </div>
+         <div id="status-area">
+              Loading...
+         </div>
+         <div id="action-area">
+             <h3>Available Actions</h3>
+             <div id="action-buttons">
+                 <!-- Action buttons will be generated here -->
+             </div>
+         </div>
+     </div>
+      <div id="debug-area">
+          <div id="debug-content"></div>
+      </div>
+
+     <script>
+         const socket = io(); // Defaults to connect to the host that serves the page
+
+         const logContent = document.getElementById('log-content');
+         const statusArea = document.getElementById('status-area');
+         const actionButtons = document.getElementById('action-buttons');
+         const debugContent = document.getElementById('debug-content');
+
+         let playerSoulId = null;
+         let currentGameState = {};
+
+         function addLogMessage(message, type = 'info') {
+             const p = document.createElement('p');
+             p.textContent = message;
+             if (type === 'error') p.style.color = 'red';
+             if (type === 'success') p.style.color = 'green';
+             logContent.appendChild(p);
+             logContent.scrollTop = logContent.scrollHeight; // Auto-scroll
+         }
+
+         function addDebugMessage(message) {
+             const d = document.createElement('div');
+             d.textContent = message;
+             debugContent.appendChild(d);
+             debugContent.scrollTop = debugContent.scrollHeight; // Auto-scroll
+         }
+
+         function updateStatus(state) {
+              if (!state || !state.playerSoul || !state.currentLocation) {
+                  statusArea.innerHTML = "Waiting for server data...";
+                  return;
+              }
+              currentGameState = state; // Store the latest state
+
+//              let statusHTML = `
+//                  <strong>${state.playerSoul.name}</strong> (ID: ${state.playerSoul.id})<br>
+//                  Location: <strong>${state.currentLocation.name}</strong><br>
+//                  <em>${state.currentLocation.description}</em><br>
+//                  Exits: ${Object.entries(state.currentLocation.exits || {}).map(([dir, loc]) => `${dir}: ${loc}`).join(', ') || 'None'} <br>
+//                   Visible Souls: ${state.visibleSouls ? state.visibleSouls.map(s => s.name + (s.id === playerSoulId ? ' (You)' : '')).join(', ') : 'None'} <br>
+//                  Inventory: ${state.inventory ? state.inventory.map(a => a.name).join(', ') || 'Empty'}
+//              `;
+//              statusArea.innerHTML = statusHTML;
+         }
+
+         function updateLog(logEntries) {
+              if (!logEntries) return;
+              logContent.innerHTML = ''; // Clear old log
+              logEntries.forEach(msg => addLogMessage(msg));
+         }
+
+
+         function renderActions(actions) {
+             actionButtons.innerHTML = ''; // Clear existing buttons
+             if (!actions || actions.length === 0) {
+                 actionButtons.innerHTML = '<p>No actions available.</p>';
+                 return;
+             }
+
+             actions.forEach(action => {
+                 const button = document.createElement('button');
+                 button.dataset.artifactId = action.artifactId; // Store artifact ID on the button
+                  button.dataset.toolName = action.toolName; // Store tool name
+
+                 // Display artifact name and description
+                 button.innerHTML = `${action.name} <span class="desc">${action.description || '(Use Artifact)'}</span>`;
+
+                 button.onclick = () => {
+                     addDebugMessage(`Clicked action: ${action.name} (Artifact: ${action.artifactId}, Tool: ${action.toolName})`);
+                     // Simple argument handling: Prompt if the tool *might* need it.
+                     // This is basic. A better approach would check the tool's parameter schema.
+                     let args = {};
+                     // Example: If tool name suggests targeting (e.g., 'attack_soul', 'give_item')
+                     if (action.toolName.includes('target') || action.toolName.includes('give') || action.toolName.includes('soul') && !action.toolName.includes('move_soul')) {
+                         const targetId = prompt(`Enter target ID for action '${action.name}':`);
+                         if (targetId === null) return; // User cancelled
+                          args.targetSoulId = targetId; // Assuming 'targetSoulId' is a common param name
+                     }
+                     if (action.toolName.includes('direction') || action.toolName.includes('move')) {
+                           const direction = prompt(`Enter direction for action '${action.name}' (e.g., north, south, east, west, up, down):`);
+                           if (direction === null || direction.trim() === '') return; // User cancelled or entered nothing
+                           args.direction = direction.toLowerCase();
+                       }
+                       // Add more potential generic arg prompts here based on tool names/conventions
+
+                     socket.emit('performAction', {
+                         artifactId: action.artifactId,
+                         args: args // Send collected args (might be empty object)
+                     });
+                 };
+                 actionButtons.appendChild(button);
+             });
+         }
+
+
+         // --- Socket Event Handlers ---
+         socket.on('connect', () => {
+             addLogMessage('Connected to the server!', 'success');
+             addDebugMessage(`Connected with socket ID: ${socket.id}`);
+             // Request initial state after connection (server might assign soul first)
+             // The server will send 'assignSoulId' then we can request state.
+         });
+
+         socket.on('disconnect', () => {
+             addLogMessage('Disconnected from the server.', 'error');
+             statusArea.innerHTML = "Disconnected.";
+             actionButtons.innerHTML = '';
+         });
+
+          socket.on('assignSoulId', (id) => {
+              playerSoulId = id;
+              addDebugMessage(`Assigned Player Soul ID: ${playerSoulId}`);
+              // Now that we have an ID, request the initial state
+              socket.emit('requestState');
+          });
+
+         socket.on('gameStateUpdate', (state) => {
+             addDebugMessage('Received gameStateUpdate');
+              // console.log("Received state:", state); // For browser console debugging
+              if (state.error){
+                  addLogMessage(`Server Error: ${state.error}`, 'error');
+                  return;
+              }
+             updateStatus(state);
+             updateLog(state.worldLog);
+         });
+
+         socket.on('availableActions', (actions) => {
+             addDebugMessage(`Received ${actions.length} available actions.`);
+             renderActions(actions);
+         });
+
+         socket.on('actionResult', (result) => {
+              addDebugMessage(`Action Result: Success=${result.success}, Msg=${result.message}`);
+              addLogMessage(result.message, result.success ? 'success' : 'error');
+              // Server should send updated actions/state if needed after an action result
+         });
+
+          socket.on('debugInfo', (message) => {
+              addDebugMessage(message);
+          });
+
+           // Fallback if state isn't pushed immediately or gets out of sync
+          socket.on('requestState', () => {
+                addDebugMessage('Server requested state refresh.');
+               if(playerSoulId) {
+                   socket.emit('requestState'); // Send our request back
+               } else {
+                   addDebugMessage("Cannot request state, playerSoulId not set yet.");
+               }
+           });
+
+
+         // Initial setup message
+         addLogMessage('Attempting to connect to server...');
+
+     </script>
+ </body>
+ </html>
